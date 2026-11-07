@@ -39,8 +39,14 @@ export class Hardware extends EventEmitter {
     this.keyRestoreFailure = null;
     this.shutdownResult = null;
     this.diagnostics = "";
-    const child = spawn(this.binary, ["--backup", this.backup], {
+    // A .mjs bridge (bridge-win/bridge.mjs on Windows) runs under this same Node;
+    // spawning a script directly is not possible on Windows.
+    const [command, args] = /\.m?js$/i.test(this.binary)
+      ? [process.execPath, [this.binary, "--backup", this.backup]]
+      : [this.binary, ["--backup", this.backup]];
+    const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
     this.child = child;
     createInterface({ input: child.stdout }).on("line", (line) => {

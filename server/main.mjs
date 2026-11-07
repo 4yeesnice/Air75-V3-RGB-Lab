@@ -32,9 +32,12 @@ import {
 } from "./engine.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const isWindows = process.platform === "win32";
 const dataDir =
   process.env.AIR_STUDIO_DATA ??
-  path.join(os.homedir(), "Library/Application Support/Air Studio");
+  (isWindows
+    ? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData/Local"), "NuPhyLab")
+    : path.join(os.homedir(), "Library/Application Support/Air Studio"));
 const port = Number(process.env.AIR_STUDIO_PORT || process.env.AIR_STUDIO_PREFERRED_PORT || 0),
   token = process.env.AIR_STUDIO_TOKEN ?? randomBytes(32).toString("hex");
 const store = await new Store(dataDir).load();
@@ -43,7 +46,7 @@ const build = await readFile(path.join(root, "signing.json"), "utf8")
   .then(text => { const value = JSON.parse(text); return { version: String(value.version ?? ""), platform: process.platform, arch: process.arch, adhoc: value.adhoc === true, identity: String(value.identity ?? ""), packagedAt: String(value.packagedAt ?? "") }; })
   .catch(() => ({ adhoc: false, identity: "", packagedAt: "" }));
 const hardware = new Hardware(
-  process.env.AIR_STUDIO_HID ?? path.join(root, "bin/HIDBridge"),
+  process.env.AIR_STUDIO_HID ?? path.join(root, isWindows ? "bridge-win/bridge.mjs" : "bin/HIDBridge"),
   path.join(dataDir, "original-lighting.json"),
 );
 const codex = new CodexAdapter();
