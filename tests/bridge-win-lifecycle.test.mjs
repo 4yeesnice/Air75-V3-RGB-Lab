@@ -204,3 +204,29 @@ test("real 1.0.23.6 board state (Win profile, custom effect at brightness 63) re
   assert.deepEqual(board.state, captured);
   assert.deepEqual(board.rendered().slice(0, 252), originalRendered);
 });
+
+test("side-only session on the real 1.0.23.6 custom effect never rewrites the palette", async () => {
+  const captured = [21, 63, 0, 0, 1, 0, 0, 6, 161, 4, 60, 2, 1, 0, 255, 0, 0, 0, 255, 0, 0, 0];
+  const board = new FakeAir75({ firmware: FW23, state: [...captured], profile: 1 });
+  const device = new Air75Device({ backupPath: tmp(), transport: board, log: () => {} });
+  await device.connect();
+  const set = await device.setSide([255, 136, 0], 40);
+  assert.equal(set.changed, true);
+  assert.deepEqual(board.state.slice(9, 17), [2, 40, captured[11], 0, 0, 255, 136, 0]);
+  assert.deepEqual(board.state.slice(0, 9), captured.slice(0, 9), "key lighting untouched");
+  assert.deepEqual(board.state.slice(17), captured.slice(17), "preset bytes untouched");
+  assert.ok(device.journals.exists(1), "backup written before the side write");
+  assert.equal((await device.setSide([255, 136, 0], 40)).changed, false, "same colour is not rewritten");
+  const back = await device.restoreSide();
+  assert.equal(back.restored, true);
+  assert.deepEqual(board.state.slice(9, 17), captured.slice(9, 17));
+  const palette = [...board.rgb];
+  await device.setSide([0, 0, 255], 100);
+  const writesBefore = board.writes;
+  const r = await device.restore();
+  assert.equal(r.verification, "stateAndCustomColors");
+  assert.deepEqual(board.state, captured);
+  assert.deepEqual(board.rgb, palette, "the user's palette is untouched");
+  assert.equal(board.writes - writesBefore, 1, "only one D6 state write, no D8 palette writes");
+  assert.ok(!device.journals.exists(1));
+});

@@ -319,7 +319,14 @@ export class Air75Device {
     if (saved.state.length === 17 && saved.state[0] === 21 && saved.state[1] !== 100) {
       throw failure("CUSTOM_BACKUP_LOSSY", "Cannot exactly restore a dimmed custom framebuffer.");
     }
-    const custom = saved.customColors ?? (saved.state[0] === 21 ? saved.renderedColors.slice(0, 252) : null);
+    // Palette to rewrite, if any. On 17-byte firmware the rendered frame of a full-brightness
+    // custom effect IS the palette. On 22-byte firmware rendered values are scaled, so they
+    // must never be written back as a palette: only D8 changes the palette, and arm()
+    // journals customColors before the first D8. No customColors there means the palette
+    // was never touched (e.g. a side-only session) and only the state needs restoring.
+    // (native/HIDBridge.swift line ~1165 has the same fallback and the same bug.)
+    const custom = saved.customColors ??
+      (saved.state[0] === 21 && saved.state.length === 17 ? saved.renderedColors.slice(0, 252) : null);
     if (custom) {
       const current = await this.readState();
       const fullPalette = [...current];
