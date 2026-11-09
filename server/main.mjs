@@ -32,9 +32,12 @@ import {
 } from "./engine.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const isWindows = process.platform === "win32";
 const dataDir =
   process.env.AIR_STUDIO_DATA ??
-  path.join(os.homedir(), "Library/Application Support/Air Studio");
+  (isWindows
+    ? path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData/Local"), "NuPhyLab")
+    : path.join(os.homedir(), "Library/Application Support/Air Studio"));
 const port = Number(process.env.AIR_STUDIO_PORT || process.env.AIR_STUDIO_PREFERRED_PORT || 0),
   token = process.env.AIR_STUDIO_TOKEN ?? randomBytes(32).toString("hex");
 const store = await new Store(dataDir).load();
@@ -43,7 +46,7 @@ const build = await readFile(path.join(root, "signing.json"), "utf8")
   .then(text => { const value = JSON.parse(text); return { version: String(value.version ?? ""), platform: process.platform, arch: process.arch, adhoc: value.adhoc === true, identity: String(value.identity ?? ""), packagedAt: String(value.packagedAt ?? "") }; })
   .catch(() => ({ adhoc: false, identity: "", packagedAt: "" }));
 const hardware = new Hardware(
-  process.env.AIR_STUDIO_HID ?? path.join(root, "bin/HIDBridge"),
+  process.env.AIR_STUDIO_HID ?? path.join(root, isWindows ? "bridge-win/bridge.mjs" : "bin/HIDBridge"),
   path.join(dataDir, "original-lighting.json"),
 );
 const codex = new CodexAdapter();
@@ -87,7 +90,11 @@ let colors = blank(),
   lastQuotaColor = null,
   quotaChanged = -Infinity,
   integrationsSuspended = false,
-  gameSideMuted = false;
+  gameSideMuted = false,
+  // "#rrggbb/brightness" of the user side colour currently on the strip; null when
+  // anything else (original, quota, mute) owns it. Any other side write resets it.
+  lastUserSide = null,
+  userSideRetryAt = -Infinity;
 let playback = {
   mode: "idle",
   playing: false,
@@ -179,7 +186,8 @@ function state() {
   return {
     device: {
       ...hardware.state,
-      sideColor: lastQuotaColor,
+      sideColor: lastQuotaColor ?? (lastUserSide ? store.data.settings.sideLight.color : null),
+      sideLightActive: lastUserSide !== null,
       storagePath: dataDir,
       storageWarning: store.warning,
       unmappedIndices: [83],
@@ -239,6 +247,7 @@ async function output(input) {
 }
 function invalidateLightingCache() {
   gameSideMuted = false;
+  lastUserSide = null;
   lastQuotaColor = null;
   quotaChanged = -Infinity;
   lastFrame = "";
@@ -265,9 +274,36 @@ async function activate() {
   playback.lastError = null;
 }
 async function updateSide(args) {
+  lastUserSide = null;
   const result = await hardware.request("side", args);
   if (result.state) hardware.state.state = result.state;
   return result;
+}
+/**
+ * The user's own side colour, or null while something with higher priority owns
+ * the strip: games / task status / trigger / audio and light sleep mute it, the
+ * Codex quota colour replaces it, and "Restore original lights" suspends it.
+ */
+function userSideTarget() {
+  const side = store.data.settings.sideLight;
+  if (!side?.enabled || !hardware.state.connected || integrationsSuspended) return null;
+  if (gameSideMuted || lastQuotaColor || lightPower.sleeping) return null;
+  if (["game", "trigger", "audio", "agent"].includes(playback.mode)) return null;
+  if (hardware.state.capabilities?.perKey === false) return null;
+  return side;
+}
+async function syncUserSide() {
+  const side = userSideTarget();
+  if (!side || performance.now() < userSideRetryAt) return;
+  const signature = `${side.color}/${side.brightness}`;
+  if (signature === lastUserSide) return;
+  try {
+    await updateSide({ color: side.color, brightness: side.brightness });
+  } catch (error) {
+    userSideRetryAt = performance.now() + 5000; // do not hammer USB on a persistent failure
+    throw error;
+  }
+  lastUserSide = signature;
 }
 async function muteGameSide() {
   if (gameSideMuted) return;
@@ -547,6 +583,7 @@ async function tick() {
         quotaChanged = performance.now();
       }
     }
+    await syncUserSide();
   } catch (e) {
     playback.lastError = e.message;
     if(playback.mode === "audio") {audio.stop("lightingFailed");playback.mode="idle";playback.playing=false;}
@@ -777,6 +814,16 @@ async function command(req) {
       }
       if (settings.quotaSideEnabled !== old.quotaSideEnabled)
         quotaChanged = -Infinity;
+      if (req.settings.sideLight !== undefined) {
+        if (settings.sideLight.enabled) {
+          // An explicit side edit resumes it even after "Restore original lights".
+          integrationsSuspended = false;
+          userSideRetryAt = -Infinity;
+          await syncUserSide();
+        } else if (lastUserSide !== null && hardware.state.connected) {
+          await updateSide({ restore: true });
+        }
+      }
       if (
         (settings.codexEnabled && !old.codexEnabled) ||
         (settings.claudeEnabled && !old.claudeEnabled) ||

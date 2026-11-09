@@ -101,6 +101,7 @@ export type GameState = {
   ball?: unknown;
   serveRemainingMs?: number;
 };
+export type SideLight = { enabled: boolean; color: string; brightness: number };
 export type AppState = {
   audio?: import("./AudioPanel").AudioState;
   bluetooth?: {connected:boolean;status:'connected'|'disconnected'|'ambiguous'|'unavailable';count:number;error:string|null};
@@ -138,6 +139,7 @@ export type AppState = {
     brightness: number;
     codexEnabled: boolean;
     quotaSideEnabled: boolean;
+    sideLight?: SideLight;
     slotIds: string[];
     [key: string]: unknown;
   };

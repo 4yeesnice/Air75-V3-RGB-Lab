@@ -1,0 +1,19 @@
+{
+  "name": "nuphylab-bridge-win",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Windows HID bridge for NuPhy Air75 V3 lighting — drop-in for bin/HIDBridge (same JSONL contract)",
+  "main": "bridge.mjs",
+  "scripts": {
+    "start": "node bridge.mjs",
+    "probe": "node probe.mjs"
+  },
+  "dependencies": {
+    "node-hid": "^3.1.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

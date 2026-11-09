@@ -106,6 +106,8 @@ export const defaultSettings = {
   codexKeyAdaptation: false,
   codexKeycapFallback: false,
   quotaSideEnabled: false,
+  // Whole side strip: the stock firmware only supports one colour and brightness.
+  sideLight: { enabled: false, color: "#ffffff", brightness: 60 },
   slotIds: [],
   autoConnect: true,
   codexTaskSource: "recent",
@@ -129,6 +131,24 @@ export const defaultSettings = {
   claudeTaskAction: "openSession",
   claudeCommandIds: [...DEFAULT_CLAUDE_COMMAND_IDS],
 };
+/** Partial updates merge into the previous value, like `audio`. */
+export function validateSideLight(input, previous = defaultSettings.sideLight) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("侧灯设置无效");
+  const next = { ...previous };
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "enabled") {
+      if (typeof value !== "boolean") throw new Error("侧灯设置无效");
+      next.enabled = value;
+    } else if (key === "color") {
+      if (typeof value !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value)) throw new Error("侧灯颜色无效");
+      next.color = value.toLowerCase();
+    } else if (key === "brightness") {
+      if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error("侧灯亮度应为 0–100 的整数");
+      next.brightness = value;
+    } else throw new Error("不支持的设置项：sideLight." + key);
+  }
+  return next;
+}
 export function validateSettings(input, previous = defaultSettings) {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new Error("设置格式无效");
@@ -136,6 +156,8 @@ export function validateSettings(input, previous = defaultSettings) {
   for (const [k, v] of Object.entries(input)) {
     if (k === "audio") {
       s.audio = validateAudio(v,previous.audio ?? DEFAULT_AUDIO);
+    } else if (k === "sideLight") {
+      s.sideLight = validateSideLight(v, previous.sideLight ?? defaultSettings.sideLight);
     } else if (k === "agentSource") {
       if (!["codex", "claude"].includes(v)) throw new Error("任务来源应用无效");
       s[k] = v;
