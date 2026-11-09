@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useAirApi } from "./api";
 import {AudioPanel} from "./AudioPanel";
+import {browserAudio} from "./browserAudio";
 import { Studio } from "./Studio";
 import { Library } from "./Library";
 import { Codex } from "./Codex";
@@ -72,6 +73,18 @@ export default function App() {
   useEffect(()=>{if(page!=="codex")setFocusCodexColors(false);},[page]);
   useCodexKeys(state,command,notify);
   useEffect(()=>{const value=state?.settings.language;if(value === "en" || value === "zh-CN") setLanguage(value);},[state?.settings.language]);
+  // Browser sound capture (no desktop app): keep "capture available" alive, end the
+  // share when the user stops it in the browser bar, and release it when the
+  // service ends the session (Stop, keyboard unplugged, another mode took over).
+  useEffect(()=>{
+    browserAudio.enable();
+    browserAudio.onEnded=()=>{browserAudio.stop();void command({op:"audioStop"}).catch(()=>{});};
+    return ()=>{browserAudio.onEnded=null;};
+  },[command]);
+  const audioSession=(state?.audio as {session?:string|null}|undefined)?.session ?? null;
+  useEffect(()=>{
+    if(browserAudio.capturing&&!browserAudio.starting&&browserAudio.session&&audioSession!==browserAudio.session) browserAudio.stop();
+  },[audioSession]);
   useEffect(()=>{
     if (!state?.settings.lightIdleMs) return;
     let last = -Infinity;

@@ -7,9 +7,10 @@ import {t} from './i18n';
 import type {AppState,Command,Key} from './types';
 import type {HSV} from '../../shared/color.mjs';
 import {AUDIO_EFFECTS} from '../../shared/audio-effects.mjs';
+import {browserAudio,browserCaptureMode,CaptureError} from './browserAudio';
 import type {AudioEffect} from '../../shared/audio-effects.mjs';
 export type AudioConfig={source:'system'|'microphone';deviceId:string;effect:AudioEffect;colorMode:'single'|'colorful';color:string;sensitivity:number;noiseFloor:number};
-export type AudioState={active:boolean;available:boolean;systemSupported:boolean;status:string;error:string|null;level:number;bands:number[];devices:{id:string;name:string}[]};
+export type AudioState={active:boolean;session?:string|null;available:boolean;systemSupported:boolean;status:string;error:string|null;level:number;bands:number[];devices:{id:string;name:string}[]};
 const defaults:AudioConfig={source:'system',deviceId:'',effect:'pulse',colorMode:'single',color:'#6f9e85',sensitivity:1.5,noiseFloor:-55};
 const errorText:Record<string,string>={microphonePermission:'请允许 NuPhyLab 使用麦克风，然后重新开始。',inputUnavailable:'麦克风不可用，请检查连接或选择其他设备。',systemCapture:'系统声音暂不可用，请检查录音权限后重试。',systemPermission:'请允许 NuPhyLab 录制系统声音，然后重新开始。',systemFormat:'当前输出设备的音频格式暂不支持，请切换输出设备。',systemUnsupported:'系统声音需要 macOS 14.2 或更新版本，请改用麦克风',keyboardDisconnected:'键盘已断开，声音采集已停止。',lightingFailed:'灯效输出已停止，请检查键盘连接后重试。',captureStopped:'声音采集已中断，请重新开始。'};
 export function AudioPanel({state,layout,command}:{state:AppState|null;layout:Key[];command:Command}){
@@ -22,17 +23,33 @@ export function AudioPanel({state,layout,command}:{state:AppState|null;layout:Ke
   const flush=async()=>{if(timer.current)clearTimeout(timer.current);const value=patch.current;patch.current={};if(Object.keys(value).length){saving.current=true;try{await command({op:'settings',settings:{audio:value}})}finally{saving.current=false}}};
   useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);const value=patch.current;patch.current={};if(Object.keys(value).length)void command({op:'settings',settings:{audio:value}}).catch(()=>{});},[command]);
   const change=(value:Partial<AudioConfig>)=>{setConfig(c=>({...c,...value}));patch.current={...patch.current,...value};if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>run(flush()),180)};
-  const start=async()=>{setBusy(true);try{await flush();await command({op:audio?.active?'audioStop':'audioStart'})}finally{setBusy(false)}};
+  const browser=browserCaptureMode();
+  const [captureError,setCaptureError]=useState<string|null>(null);
+  const start=async()=>{
+    setBusy(true);setCaptureError(null);
+    try{
+      if(audio?.active){browserAudio.stop();await flush();await command({op:'audioStop'});return;}
+      // In a browser the capture prompt must open straight from this click, before any request.
+      if(browser)await browserAudio.start(config.source,config.deviceId);
+      await flush();
+      try{const started=await command({op:'audioStart'}) as {session?:string|null}|undefined;if(browser&&started?.session)browserAudio.attach(started.session);}
+      catch(error){browserAudio.stop();throw error;}
+    }catch(error){if(error instanceof CaptureError)setCaptureError(error.message);throw error;}
+    finally{setBusy(false)}
+  };
   const permission=async()=>{
     const bridge=(window as Window & {webkit?:{messageHandlers?:{audioControl?:{postMessage:(value:unknown)=>Promise<unknown>}}}}).webkit?.messageHandlers?.audioControl;
     if(bridge)await bridge.postMessage({permission:config.source==='microphone'?'microphone':'system'});
   };
   const status=audio?.status==='paused'?'随键盘休眠':audio?.status==='requesting'?'等待声音权限':audio?.status==='starting'?'正在连接声音':audio?.active?'正在聆听':'尚未开始';
-  const unavailable=!state?.device.connected?'声音律动需要 USB 有线连接':!audio?.available?'请在 NuPhyLab 桌面应用中使用声音律动':config.source==='system'&&!audio.systemSupported?'系统声音需要 macOS 14.2 或更新版本，请改用麦克风':null;
+  const unavailable=!state?.device.connected?'声音律动需要 USB 有线连接'
+    :!audio?.available?(browser?'正在准备声音采集…':'请在 NuPhyLab 桌面应用中使用声音律动')
+    :config.source==='system'&&!audio.systemSupported?(browser?'当前浏览器不支持共享系统声音，请使用 Chrome 或 Edge，或改用麦克风。':'系统声音需要 macOS 14.2 或更新版本，请改用麦克风'):null;
   return <section className="audio-page studio-page">
     <header className="page-heading"><div><h1>{t('声音律动')}</h1><p>{t('让声音，在键盘上流动。')}</p></div><Button kind="primary" icon={audio?.active?<Square size={16}/>:<Play size={16}/>} busy={busy} disabled={!audio?.active&&!!unavailable} onClick={()=>run(start())}>{t(audio?.active?'停止律动':'开始律动')}</Button></header>
     {unavailable&&<div className="wireless-notice" role="status">{t(unavailable)}</div>}
-    {audio?.error&&<div className="audio-error" role="alert"><span>{t(errorText[audio.error]??errorText.captureStopped)}</span>{['microphonePermission','systemPermission','systemCapture'].includes(audio.error)&&<Button icon={<ArrowUpRight size={14}/>} onClick={()=>run(permission())}>{t('系统设置')}</Button>}</div>}
+    {captureError&&!audio?.active&&<div className="audio-error" role="alert"><span>{t(captureError)}</span></div>}
+    {audio?.error&&!captureError&&<div className="audio-error" role="alert"><span>{t(errorText[audio.error]??errorText.captureStopped)}</span>{!browser&&['microphonePermission','systemPermission','systemCapture'].includes(audio.error)&&<Button icon={<ArrowUpRight size={14}/>} onClick={()=>run(permission())}>{t('系统设置')}</Button>}</div>}
     <div className="audio-stage">
       <div className="audio-stage-heading"><span><AudioLines size={16}/>{t(status)}</span>{audio?.status==='paused'&&<Button kind="ghost" onClick={()=>run(command({op:'lightWake'}))}>{t('唤醒灯光')}</Button>}<div className="audio-meter" role="meter" aria-label={t('声音电平')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((audio?.level??0)*100)}><i style={{width:`${(audio?.level??0)*100}%`}}/></div></div>
       <div className="keyboard-area"><Keyboard layout={layout} colors={audio?.active?state?.colors??[]:Array(84).fill('#000000')} sideColor="#000000"/></div>
@@ -47,7 +64,7 @@ export function AudioPanel({state,layout,command}:{state:AppState|null;layout:Ke
       <section><h3>{t('声音来源')}</h3><div className="audio-source" role="group" aria-label={t('声音来源')}>
         <button aria-pressed={config.source==='system'} disabled={!!audio?.active} onClick={()=>change({source:'system'})}><Monitor size={16}/>{t('系统声音')}</button>
         <button aria-pressed={config.source==='microphone'} disabled={!!audio?.active} onClick={()=>change({source:'microphone'})}><Mic size={16}/>{t('麦克风')}</button>
-      </div>{config.source==='microphone'?<label className="form-field"><span>{t('输入设备')}</span><select aria-label={t('输入设备')} disabled={!!audio?.active} value={config.deviceId} onChange={e=>change({deviceId:e.target.value})}><option value="">{t('系统默认麦克风')}</option>{config.deviceId&&!audio?.devices.some(d=>d.id===config.deviceId)&&<option value={config.deviceId}>{t('所选设备已断开')}</option>}{audio?.devices.map(d=><option value={d.id} key={d.id}>{d.name}</option>)}</select></label>:<p className="muted">{t('直接跟随电脑播放的声音，戴耳机也可以。')}</p>}</section>
+      </div>{config.source==='microphone'?<label className="form-field"><span>{t('输入设备')}</span><select aria-label={t('输入设备')} disabled={!!audio?.active} value={config.deviceId} onChange={e=>change({deviceId:e.target.value})}><option value="">{t('系统默认麦克风')}</option>{config.deviceId&&!audio?.devices.some(d=>d.id===config.deviceId)&&<option value={config.deviceId}>{t('所选设备已断开')}</option>}{audio?.devices.map(d=><option value={d.id} key={d.id}>{d.name}</option>)}</select></label>:<p className="muted">{t(browser?'点击「开始律动」后，在浏览器窗口中选择「整个屏幕」并开启「分享系统音频」。窗口最小化后仍会继续。':'直接跟随电脑播放的声音，戴耳机也可以。')}</p>}</section>
       <section className="audio-color"><h3>{t('颜色')}</h3>
         <div className="audio-source" role="group" aria-label={t('颜色模式')}>
           <button aria-pressed={config.colorMode!=='colorful'} onClick={()=>change({colorMode:'single'})}><i className="audio-color-dot" style={{background:config.color}} aria-hidden="true"/>{t('单色')}</button>

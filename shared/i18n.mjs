@@ -1098,6 +1098,13 @@ export const messages = {
   "侧灯设置无效": "Invalid side light setting",
   "侧灯颜色无效": "Invalid side light colour",
   "侧灯亮度应为 0–100 的整数": "Side light brightness must be a whole number from 0 to 100",
+  "请在浏览器中允许使用麦克风，然后重新开始。": "Allow microphone access in the browser, then start again.",
+  "当前浏览器不支持共享系统声音，请使用 Chrome 或 Edge，或改用麦克风。": "This browser cannot share system audio. Use Chrome or Edge, or switch to the microphone.",
+  "已取消共享。请选择「整个屏幕」并开启「分享系统音频」。": "Sharing was cancelled. Choose Entire screen and turn on Share system audio.",
+  "共享中没有声音。请选择「整个屏幕」并开启「分享系统音频」。": "The share has no audio. Choose Entire screen and turn on Share system audio.",
+  "无法开始共享屏幕（{0}），请重试或改用麦克风。": "Could not start screen sharing ({0}). Try again or switch to the microphone.",
+  "正在准备声音采集…": "Preparing sound capture…",
+  "点击「开始律动」后，在浏览器窗口中选择「整个屏幕」并开启「分享系统音频」。窗口最小化后仍会继续。": "After Start, choose Entire screen in the browser dialog and turn on Share system audio. It keeps running when the window is minimised.",
 };
 
 const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
