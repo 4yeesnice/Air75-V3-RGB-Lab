@@ -3,15 +3,16 @@
 //   node bridge-win/probe.mjs            read-only: interfaces, firmware, profile, state, colours
 //   node bridge-win/probe.mjs --paint    5 s rainbow on the 84 keys, then verified restore
 // Close NuPhyIO and the NuPhyLab app first: only one program may own the lighting interface.
-import os from "node:os";
 import path from "node:path";
-import fs from "node:fs";
 import { HidTransport, isLightingInterface } from "./transport.mjs";
 import { Air75Device } from "./device.mjs";
 import { VENDOR_ID, PRODUCT_ID, firmwareVersion } from "./s4.mjs";
+import { defaultDataDir } from "./bridge.mjs";
 
 const paint = process.argv.includes("--paint");
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nuphylab-probe-"));
+// Same journal the app uses (%LOCALAPPDATA%\NuPhyLab), so an interrupted probe can be
+// recovered by running the probe again or by the app's normal connect + restore.
+const backupPath = path.join(defaultDataDir(), "original-lighting.json");
 const log = (m) => console.log(m);
 
 try {
@@ -25,10 +26,15 @@ try {
 }
 
 const transport = new HidTransport({ log });
-const device = new Air75Device({ backupPath: path.join(dir, "probe-lighting.json"), transport, log });
+const device = new Air75Device({ backupPath, transport, log });
 let exitCode = 0;
 try {
   const c = await device.connect();
+  if (c.recoveryPending) {
+    log(`\nA lighting backup from an interrupted session exists (${device.backupPath}). Restoring it first…`);
+    const r = await device.restore();
+    log(`Restore: ${r.verification}, verified=${r.verified}`);
+  }
   log(`\nFirmware ${firmwareVersion(c.firmware)} (${c.firmwareHex}), LEDs ${c.ledCount}, profile ${c.lightingProfile === 1 ? "Win" : "Mac"}`);
   log(`State (${c.state.length} bytes): ${c.state.join(",")}`);
   log(`Capabilities: ${JSON.stringify(c.capabilities)}`);

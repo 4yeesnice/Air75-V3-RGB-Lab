@@ -188,3 +188,19 @@ test("rendered-colour inverse matches the simulated renderer", () => {
   board.rgb = [...S4.paletteFromRendered(S4.renderedCustomColors(colors((i) => [i, i, i]), FW23), FW23), ...new Array(60).fill(0)];
   assert.deepEqual(board.rendered().slice(0, 252), S4.renderedCustomColors(colors((i) => [i, i, i]), FW23));
 });
+
+test("real 1.0.23.6 board state (Win profile, custom effect at brightness 63) restores exactly", async () => {
+  // D5 captured from an Air75 V3 on Windows via `probe.mjs`; first keys rendered 16/16/126.
+  const captured = [21, 63, 0, 0, 1, 0, 0, 6, 161, 4, 60, 2, 1, 0, 255, 0, 0, 0, 255, 0, 0, 0];
+  assert.deepEqual(S4.mainColorReadback(captured.slice(6, 9)), captured.slice(6, 9));
+  const board = new FakeAir75({ firmware: FW23, state: [...captured], profile: 1 });
+  board.rgb = [...Array.from({ length: 252 }, (_, i) => (i % 3 === 2 ? 255 : 32 + (i % 41))), ...new Array(60).fill(0)];
+  const originalRendered = board.rendered().slice(0, 252);
+  const device = new Air75Device({ backupPath: tmp(), transport: board, log: () => {} });
+  await device.connect(); await device.arm();
+  for (let f = 0; f < 10; f++) await device.paint(Array.from({ length: 252 }, (_, i) => (i * 7 + f * 13) % 256), false);
+  const r = await device.restore();
+  assert.equal(r.verification, "stateAndCustomColors");
+  assert.deepEqual(board.state, captured);
+  assert.deepEqual(board.rendered().slice(0, 252), originalRendered);
+});
