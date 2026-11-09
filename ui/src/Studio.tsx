@@ -219,20 +219,44 @@ export function Studio({
       notify("颜色格式应为 #DC847B");
     }
   };
+  // Colours + animation of the draft, and of what this page last sent with Play.
+  const draftSignature = `${draftColorSignature}|${JSON.stringify(draft.animation)}`;
+  const sentSignature = useRef("");
+  const sendDraft = (scene: Scene) => {
+    sentSignature.current = `${scene.colors.join("").toLowerCase()}|${JSON.stringify(scene.animation)}`;
+    return command({
+      op: scene.animation.effect === "static" ? "preview" : "play",
+      colors: scene.colors,
+      animation: scene.animation,
+    });
+  };
   const play = async () => {
     setPlayBusy(true);
     try {
-      await command({
-        op: draft.animation.effect === "static" ? "preview" : "play",
-        colors: draft.colors,
-        animation: draft.animation,
-      });
+      await sendDraft(draft);
+    } catch (error) {
+      sentSignature.current = "";
+      throw error;
     } finally {
       setPlayBusy(false);
     }
   };
   const hardwarePlaying = Boolean(state?.playback.playing && state.playback.mode !== "trigger"),
     paused = state?.playback.mode === "paused";
+  // Paused, then the speed/effect/colours were edited: Resume would replay the old
+  // animation, so the main button plays the edited draft instead.
+  const pausedEdited = paused && sentSignature.current !== "" && sentSignature.current !== draftSignature;
+  // While an animation from this page is playing, edits go to the keyboard live.
+  useEffect(() => {
+    if (tab !== "animation" || !state?.device.connected) return;
+    if (!(state.playback.mode === "animation" && state.playback.playing)) return;
+    if (sentSignature.current === "" || sentSignature.current === draftSignature) return;
+    const scene = draft;
+    const timer = setTimeout(() => {
+      void sendDraft(scene).catch(() => { sentSignature.current = ""; });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [draftSignature, tab, state?.device.connected, state?.playback.mode, state?.playback.playing]);
   const pausedDraft = useRef<{ paused: boolean; signature: string }>({
     paused: false,
     signature: draftColorSignature,
@@ -296,7 +320,7 @@ export function Studio({
                 disabled={!state?.device.connected || state?.firmware?.compatible === false}
                 onClick={() =>
                   run(
-                    hardwarePlaying || paused
+                    hardwarePlaying || (paused && !pausedEdited)
                       ? command({ op: "pause" })
                       : play(),
                   )
@@ -304,7 +328,7 @@ export function Studio({
               >
                 {tr(hardwarePlaying
                   ? "暂停播放"
-                  : paused
+                  : paused && !pausedEdited
                     ? "继续播放"
                     : "播放到键盘")}
               </Button>
