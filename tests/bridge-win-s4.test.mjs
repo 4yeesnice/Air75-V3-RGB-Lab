@@ -122,3 +122,19 @@ test("color parsing", () => {
   assert.deepEqual(S4.hexColors([255, 64, 128]), ["#ff4080"]);
   assert.equal(code(() => S4.parseColors(["#fff"], 1)), "INVALID_COLOR");
 });
+
+test("lighting interface selection on a real Windows Air75 V3 enumeration", async () => {
+  const { isLightingInterface } = await import("../bridge-win/transport.mjs");
+  // node-hid output captured on Windows 11; zero usage fields are omitted by node-hid.
+  const windows = [
+    { usagePage: 1, usage: 2, interface: 2 },
+    { usagePage: 1, usage: 0x80, interface: 2 },
+    { usagePage: 0xc, usage: 1, interface: 2 },
+    { usagePage: 1, interface: 3 },
+    { usagePage: 1, usage: 6, interface: 0 },
+    { usagePage: 1, usage: 6, interface: 1 },
+  ];
+  assert.deepEqual(windows.filter(isLightingInterface).map((d) => d.interface), [3]);
+  assert.ok(isLightingInterface({ usagePage: 1, usage: 0 }), "explicit zero still matches");
+  assert.ok(!isLightingInterface({ usage: 0 }), "missing usage page is not page 1");
+});

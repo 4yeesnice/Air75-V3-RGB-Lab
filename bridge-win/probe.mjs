@@ -6,7 +6,7 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { HidTransport } from "./transport.mjs";
+import { HidTransport, isLightingInterface } from "./transport.mjs";
 import { Air75Device } from "./device.mjs";
 import { VENDOR_ID, PRODUCT_ID, firmwareVersion } from "./s4.mjs";
 
@@ -18,7 +18,7 @@ try {
   const HID = (await import("node-hid")).default;
   const all = await HID.devicesAsync(VENDOR_ID, PRODUCT_ID);
   log(`Air75 V3 HID interfaces (${all.length}):`);
-  for (const d of all) log(`  usagePage=0x${(d.usagePage ?? 0).toString(16)} usage=0x${(d.usage ?? 0).toString(16)} interface=${d.interface} ${d.usagePage === 1 && d.usage === 0 ? "<- lighting" : ""}`);
+  for (const d of all) log(`  usagePage=0x${(d.usagePage ?? 0).toString(16)} usage=0x${(d.usage ?? 0).toString(16)} interface=${d.interface} ${isLightingInterface(d) ? "<- lighting" : ""}`);
 } catch (e) {
   log(`node-hid unavailable: ${e.message}\nRun: npm --prefix bridge-win install`);
   process.exit(1);

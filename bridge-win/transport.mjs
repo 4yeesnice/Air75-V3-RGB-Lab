@@ -5,6 +5,13 @@ import { VENDOR_ID, PRODUCT_ID, REPORT_SIZE, validate, failure } from "./s4.mjs"
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The lighting endpoint: usage page 1 / usage 0, same rule as the Mac bridge.
+ * node-hid only sets `usagePage`/`usage` when they are non-zero (src/devices.cc),
+ * so usage 0 arrives as a missing field and must be read with `?? 0`.
+ */
+export const isLightingInterface = (d) => (d.usagePage ?? 0) === 1 && (d.usage ?? 0) === 0;
+
 async function loadHID() {
   try {
     return (await import("node-hid")).default;
@@ -26,9 +33,8 @@ export class HidTransport {
   async open() {
     const HID = await loadHID();
     const all = await HID.devicesAsync(VENDOR_ID, PRODUCT_ID);
-    // Same rule as the Mac bridge: exactly one usage page 1 / usage 0 interface.
-    // hidapi reports usagePage/usage on Windows and macOS (not on Linux hidraw).
-    const candidates = all.filter((d) => d.usagePage === 1 && d.usage === 0);
+    // Exactly one lighting interface, as on the Mac bridge.
+    const candidates = all.filter(isLightingInterface);
     if (process.env.AIR_STUDIO_HID_DEBUG) this.log(`HID interfaces: ${JSON.stringify(all.map(({ path, usagePage, usage, interface: i }) => ({ path, usagePage, usage, interface: i })))}`);
     if (candidates.length === 0) throw failure("DEVICE_NOT_FOUND", "Air75 V3 not found. Connect it by USB in wired mode.");
     if (candidates.length > 1) throw failure("MULTIPLE_DEVICES", "More than one Air75 V3 lighting interface found; connect only one keyboard.");
