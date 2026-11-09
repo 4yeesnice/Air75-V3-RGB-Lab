@@ -1084,6 +1084,20 @@ export const messages = {
   "这个会话的标识不适用于 Claude 的会话链接": "This session id cannot be used in a Claude session link",
   "无法打开这个会话，请确认 Claude 桌面应用已安装。": "Could not open this session; check that the Claude desktop app is installed.",
   "会话链接无效": "The session link is invalid",
+  "侧灯": "Side lights",
+  "整条侧灯使用同一颜色；原厂固件不支持逐颗控制。": "The whole side strip shows one colour; the stock firmware cannot control individual LEDs.",
+  "自定义侧灯颜色": "Custom side light colour",
+  "侧灯亮度": "Side light brightness",
+  "侧灯保持键盘原有设置。": "The side lights keep the keyboard's own setting.",
+  "连接键盘后生效。": "Takes effect when the keyboard is connected.",
+  "侧灯正在显示所选颜色。": "The side lights show the selected colour.",
+  "灯光休眠中，唤醒后恢复。": "Lights are asleep; the colour returns when they wake.",
+  "游戏、状态灯、触发和声音律动期间侧灯熄灭，结束后恢复。": "Side lights stay off during games, task status lights, triggers and audio; the colour returns afterwards.",
+  "Codex 额度侧灯优先显示。": "The Codex quota colour takes priority on the side lights.",
+  "点击「恢复原有灯效」后侧灯也会恢复，修改颜色或重新播放后再次生效。": "Restore original lights also restores the side lights; change the colour or play again to reapply it.",
+  "侧灯设置无效": "Invalid side light setting",
+  "侧灯颜色无效": "Invalid side light colour",
+  "侧灯亮度应为 0–100 的整数": "Side light brightness must be a whole number from 0 to 100",
 };
 
 const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

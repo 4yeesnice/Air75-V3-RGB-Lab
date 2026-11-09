@@ -90,7 +90,11 @@ let colors = blank(),
   lastQuotaColor = null,
   quotaChanged = -Infinity,
   integrationsSuspended = false,
-  gameSideMuted = false;
+  gameSideMuted = false,
+  // "#rrggbb/brightness" of the user side colour currently on the strip; null when
+  // anything else (original, quota, mute) owns it. Any other side write resets it.
+  lastUserSide = null,
+  userSideRetryAt = -Infinity;
 let playback = {
   mode: "idle",
   playing: false,
@@ -182,7 +186,8 @@ function state() {
   return {
     device: {
       ...hardware.state,
-      sideColor: lastQuotaColor,
+      sideColor: lastQuotaColor ?? (lastUserSide ? store.data.settings.sideLight.color : null),
+      sideLightActive: lastUserSide !== null,
       storagePath: dataDir,
       storageWarning: store.warning,
       unmappedIndices: [83],
@@ -242,6 +247,7 @@ async function output(input) {
 }
 function invalidateLightingCache() {
   gameSideMuted = false;
+  lastUserSide = null;
   lastQuotaColor = null;
   quotaChanged = -Infinity;
   lastFrame = "";
@@ -268,9 +274,36 @@ async function activate() {
   playback.lastError = null;
 }
 async function updateSide(args) {
+  lastUserSide = null;
   const result = await hardware.request("side", args);
   if (result.state) hardware.state.state = result.state;
   return result;
+}
+/**
+ * The user's own side colour, or null while something with higher priority owns
+ * the strip: games / task status / trigger / audio and light sleep mute it, the
+ * Codex quota colour replaces it, and "Restore original lights" suspends it.
+ */
+function userSideTarget() {
+  const side = store.data.settings.sideLight;
+  if (!side?.enabled || !hardware.state.connected || integrationsSuspended) return null;
+  if (gameSideMuted || lastQuotaColor || lightPower.sleeping) return null;
+  if (["game", "trigger", "audio", "agent"].includes(playback.mode)) return null;
+  if (hardware.state.capabilities?.perKey === false) return null;
+  return side;
+}
+async function syncUserSide() {
+  const side = userSideTarget();
+  if (!side || performance.now() < userSideRetryAt) return;
+  const signature = `${side.color}/${side.brightness}`;
+  if (signature === lastUserSide) return;
+  try {
+    await updateSide({ color: side.color, brightness: side.brightness });
+  } catch (error) {
+    userSideRetryAt = performance.now() + 5000; // do not hammer USB on a persistent failure
+    throw error;
+  }
+  lastUserSide = signature;
 }
 async function muteGameSide() {
   if (gameSideMuted) return;
@@ -550,6 +583,7 @@ async function tick() {
         quotaChanged = performance.now();
       }
     }
+    await syncUserSide();
   } catch (e) {
     playback.lastError = e.message;
     if(playback.mode === "audio") {audio.stop("lightingFailed");playback.mode="idle";playback.playing=false;}
@@ -780,6 +814,16 @@ async function command(req) {
       }
       if (settings.quotaSideEnabled !== old.quotaSideEnabled)
         quotaChanged = -Infinity;
+      if (req.settings.sideLight !== undefined) {
+        if (settings.sideLight.enabled) {
+          // An explicit side edit resumes it even after "Restore original lights".
+          integrationsSuspended = false;
+          userSideRetryAt = -Infinity;
+          await syncUserSide();
+        } else if (lastUserSide !== null && hardware.state.connected) {
+          await updateSide({ restore: true });
+        }
+      }
       if (
         (settings.codexEnabled && !old.codexEnabled) ||
         (settings.claudeEnabled && !old.claudeEnabled) ||

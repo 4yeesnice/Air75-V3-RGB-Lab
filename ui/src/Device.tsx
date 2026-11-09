@@ -14,6 +14,7 @@ import { Button, run, Switch } from "./primitives";
 import type { AppState, Command } from "./types";
 import { FirmwareStatus } from "./FirmwareStatus";
 import { LightingTimers } from "./LightingTimers";
+import { SideLight } from "./SideLight";
 function permissionLabel(value: unknown) {
   if (value === true || value === "granted" || value === "authorized")
     return "已允许";
@@ -113,7 +114,7 @@ export function Device({
         </div>
       </section>
       <FirmwareStatus state={state} command={command} />
-      {wireless ? <div className="wireless-notice"><strong>{tr("灯光控制需要 USB 有线连接")}</strong><p>{tr("蓝牙下不发送状态灯、动画、游戏或灯光计时指令。原有设置会保留，切回有线后可继续使用。")}</p></div> : <LightingTimers state={state} command={command} />}
+      {wireless ? <div className="wireless-notice"><strong>{tr("灯光控制需要 USB 有线连接")}</strong><p>{tr("蓝牙下不发送状态灯、动画、游戏或灯光计时指令。原有设置会保留，切回有线后可继续使用。")}</p></div> : <><LightingTimers state={state} command={command} /><SideLight state={state} command={command} /></>}
       {state?.bluetooth?.status==='ambiguous' && <p className="inline-error">{tr("检测到多把 Air75 V3 蓝牙键盘，请只连接要使用的一把。")}</p>}
       {tr((device?.error ||
         serviceError ||
