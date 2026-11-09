@@ -3,8 +3,6 @@
 // (not the keyboard collection, which Windows locks exclusively).
 import { VENDOR_ID, PRODUCT_ID, REPORT_SIZE, validate, failure } from "./s4.mjs";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 /**
  * The lighting endpoint: usage page 1 / usage 0, same rule as the Mac bridge.
  * node-hid only sets `usagePage`/`usage` when they are non-zero (src/devices.cc),
@@ -21,8 +19,10 @@ async function loadHID() {
 }
 
 export class HidTransport {
-  constructor({ log = () => {} } = {}) {
+  /** `hid` replaces the node-hid module (tests). */
+  constructor({ log = () => {}, hid = null } = {}) {
     this.log = log;
+    this.hid = hid;
     this.device = null;
     this.replies = [];
     this.removed = false;
@@ -31,7 +31,7 @@ export class HidTransport {
   }
 
   async open() {
-    const HID = await loadHID();
+    const HID = this.hid ?? (await loadHID());
     const all = await HID.devicesAsync(VENDOR_ID, PRODUCT_ID);
     // Exactly one lighting interface, as on the Mac bridge.
     const candidates = all.filter(isLightingInterface);
@@ -46,18 +46,25 @@ export class HidTransport {
     }
     this.serial = info.serialNumber ?? "";
     this.replies = [];
+    this.waiter = null;
     this.removed = false;
     this.device.on("data", (buf) => {
       // hidapi returns 64 bytes for devices without report IDs; drop a leading 0 if a 65-byte read appears.
       const bytes = buf.length === REPORT_SIZE + 1 && buf[0] === 0 ? buf.subarray(1) : buf;
-      if (bytes.length === REPORT_SIZE) {
-        this.replies.push(Array.from(bytes));
+      if (bytes.length !== REPORT_SIZE) return;
+      const reply = Array.from(bytes);
+      // Wake the pending exchange immediately. Polling with setTimeout cost ~15 ms
+      // per packet on Windows, where libuv timers round up to the system tick.
+      if (this.waiter?.matches(reply)) this.waiter.resolve(reply);
+      else {
+        this.replies.push(reply);
         if (this.replies.length > 64) this.replies.splice(0, this.replies.length - 64);
       }
     });
     this.device.on("error", (e) => {
       this.log(`HID error: ${e?.message ?? e}`);
       this.removed = true;
+      this.waiter?.reject(failure("DISCONNECTED", "Keyboard unplugged during a transaction; backup retained."));
       this.onRemoved?.();
     });
     return { serial: this.serial };
@@ -67,29 +74,45 @@ export class HidTransport {
     return this.device !== null && !this.removed;
   }
 
+  /** Round-trip timing for diagnostics (probe.mjs prints it). */
+  stats = { exchanges: 0, writeMs: 0, replyMs: 0 };
+
   /** One request, one validated reply. Never resends an uncertain write. */
   async exchange(frame, timeoutMs = 650) {
     if (!this.device) throw failure("NOT_CONNECTED", "Connect the Air75 V3 by USB first.");
-    this.replies.length = 0;
+    if (this.removed) throw failure("DISCONNECTED", "Keyboard unplugged during a transaction; backup retained.");
+    const command = frame[1];
+    const matches = (r) => r[0] === 0xaa && r[1] === command;
+    this.replies.length = 0; // stale replies from an earlier timed-out request must not answer this one
+    let timer;
+    const reply = new Promise((resolve, reject) => {
+      this.waiter = { matches, resolve, reject };
+      timer = setTimeout(() => reject(failure("HID_TIMEOUT",
+        `No valid ${command.toString(16).toUpperCase()} response. Stop other HID clients and reconnect; no blind write retry was performed.`)), timeoutMs);
+    });
+    reply.catch(() => {}); // a rejection before we await it below must not become unhandled
+    const t0 = performance.now();
     try {
-      // hidapi convention: first byte is the report ID (0 = none), then the 64-byte report.
-      await this.device.write([0x00, ...frame]);
-    } catch (e) {
-      throw failure("HID_WRITE_FAILED", `HID output failed (${e.message}); reconnect the cable and close other lighting apps.`);
-    }
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (this.removed) throw failure("DISCONNECTED", "Keyboard unplugged during a transaction; backup retained.");
-      while (this.replies.length) {
-        const reply = this.replies.shift();
-        if (reply[0] === 0xaa && reply[1] === frame[1]) {
-          validate(reply, frame[1]);
-          return reply;
-        }
+      try {
+        // hidapi convention: first byte is the report ID (0 = none), then the 64-byte report.
+        await this.device.write([0x00, ...frame]);
+      } catch (e) {
+        throw failure("HID_WRITE_FAILED", `HID output failed (${e.message}); reconnect the cable and close other lighting apps.`);
       }
-      await sleep(2);
+      const t1 = performance.now();
+      // A reply can arrive while write() is still resolving; it is queued in this.replies.
+      const early = this.replies.find(matches);
+      const result = early ?? (await reply);
+      validate(result, command);
+      this.stats.exchanges++;
+      this.stats.writeMs += t1 - t0;
+      this.stats.replyMs += performance.now() - t1;
+      return result;
+    } finally {
+      clearTimeout(timer);
+      this.waiter = null;
+      this.replies.length = 0;
     }
-    throw failure("HID_TIMEOUT", `No valid ${frame[1].toString(16).toUpperCase()} response. Stop other HID clients and reconnect; no blind write retry was performed.`);
   }
 
   async close() {

@@ -44,18 +44,23 @@ try {
   else {
     log("\nArming (backup is written first)…");
     await device.arm();
-    const t0 = Date.now();
-    let frames = 0;
-    while (Date.now() - t0 < 5000) {
-      const shift = (Date.now() - t0) / 20;
-      const colors = Array.from({ length: 84 }, (_, i) => {
-        const h = ((i * 6 + shift) % 360) / 60, x = Math.round(255 * (1 - Math.abs((h % 2) - 1)));
-        return [[255, x, 0], [x, 255, 0], [0, 255, x], [0, x, 255], [x, 0, 255], [255, 0, x]][Math.floor(h) % 6];
-      }).flat();
-      await device.paint(colors, false);
-      frames++;
-    }
-    log(`Painted ${frames} frames in 5 s (~${(frames / 5).toFixed(1)} fps). Restoring…`);
+    const hue = (h) => { h = (h % 360) / 60; const x = Math.round(255 * (1 - Math.abs((h % 2) - 1))); return [[255, x, 0], [x, 255, 0], [0, 255, x], [0, x, 255], [x, 0, 255], [255, 0, x]][Math.floor(h) % 6]; };
+    const run = async (label, seconds, frameAt) => {
+      const s = transport.stats; s.exchanges = 0; s.writeMs = 0; s.replyMs = 0;
+      const t0 = performance.now();
+      let frames = 0;
+      while (performance.now() - t0 < seconds * 1000) {
+        await device.paint(frameAt(performance.now() - t0), false);
+        frames++;
+      }
+      const ms = performance.now() - t0, n = Math.max(1, s.exchanges);
+      log(`${label}: ${frames} frames in ${seconds} s = ${(frames / (ms / 1000)).toFixed(1)} fps | ${s.exchanges} packets, write ${(s.writeMs / n).toFixed(1)} ms + reply ${(s.replyMs / n).toFixed(1)} ms per packet`);
+    };
+    // Worst case: all 84 keys change every frame (7 D8 packets).
+    await run("Full rainbow ", 5, (t) => Array.from({ length: 84 }, (_, i) => hue(i * 6 + t / 20)).flat());
+    // Typical effect: a dim base with one bright key moving (≈2 keys change per frame, 1 packet).
+    await run("Moving dot   ", 3, (t) => { const at = Math.floor(t / 40) % 84; return Array.from({ length: 84 }, (_, i) => (i === at ? [255, 255, 255] : [0, 0, 40])).flat(); });
+    log("Restoring…");
     const r = await device.restore();
     log(`Restore: ${r.verification}, verified=${r.verified}`);
   }
